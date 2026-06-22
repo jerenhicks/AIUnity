@@ -1,0 +1,9 @@
+{
+  "_comment": "Copy this file to llm.config.json (git-ignored) and fill in your values. baseUrl is the OpenAI-compatible API root; the brain appends /chat/completions. apiKey may be left empty for most local servers.",
+  "baseUrl": "https://api.openai.com/v1",
+  "apiKey": "PASTE-YOUR-KEY-HERE",
+  "model": "gpt-4o-mini",
+  "temperature": 0.8,
+  "maxTokens": 300,
+  "timeoutSeconds": 30
+}
