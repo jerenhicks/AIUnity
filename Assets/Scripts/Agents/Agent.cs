@@ -27,11 +27,19 @@ namespace AISandbox.Agents
 
         public string DisplayName => AgentId;
 
+        /// <summary>True while this agent is the user's current selection.</summary>
+        public bool IsSelected { get; private set; }
+
         private WorldGrid _grid;
         private Transform _marker;
+        private GameObject _outline;
 
         /// <summary>Height of the marker above the tile surface.</summary>
         private const float MarkerScale = 0.45f;
+
+        // Shared outline material (same for every agent), built lazily from the shader.
+        private static Material _outlineMaterial;
+        private static bool _outlineWarned;
 
         public void Init(WorldGrid grid, string id, GridCoord coord, AgentStats stats, Color color)
         {
@@ -135,6 +143,59 @@ namespace AISandbox.Agents
             visual.transform.localScale = Vector3.one * MarkerScale;
             visual.GetComponent<MeshRenderer>().sharedMaterial = MaterialUtil.CreateColored(color);
             _marker = visual.transform;
+        }
+
+        // ---- Selection ----------------------------------------------------------
+
+        /// <summary>Shows or hides this agent's selection outline.</summary>
+        public void SetSelected(bool selected)
+        {
+            IsSelected = selected;
+            if (selected) EnsureOutline();
+            if (_outline != null) _outline.SetActive(selected);
+        }
+
+        /// <summary>
+        /// Lazily builds a back-face-only copy of the marker mesh that renders with
+        /// the outline shader. Inherits the marker's transform, so it tracks the agent.
+        /// </summary>
+        private void EnsureOutline()
+        {
+            if (_outline != null || _marker == null) return;
+
+            var mf = _marker.GetComponent<MeshFilter>();
+            var mat = OutlineMaterial;
+            if (mf == null || mat == null) return;
+
+            _outline = new GameObject("SelectionOutline", typeof(MeshFilter), typeof(MeshRenderer));
+            _outline.transform.SetParent(_marker, false);
+            _outline.GetComponent<MeshFilter>().sharedMesh = mf.sharedMesh;
+            var r = _outline.GetComponent<MeshRenderer>();
+            r.sharedMaterial = mat;
+            r.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+            r.receiveShadows = false;
+        }
+
+        private static Material OutlineMaterial
+        {
+            get
+            {
+                if (_outlineMaterial == null)
+                {
+                    var shader = Shader.Find("AISandbox/AgentOutline");
+                    if (shader == null)
+                    {
+                        if (!_outlineWarned)
+                        {
+                            Debug.LogWarning("Agent: 'AISandbox/AgentOutline' shader not found; selection outline disabled.");
+                            _outlineWarned = true;
+                        }
+                        return null;
+                    }
+                    _outlineMaterial = new Material(shader);
+                }
+                return _outlineMaterial;
+            }
         }
     }
 }
