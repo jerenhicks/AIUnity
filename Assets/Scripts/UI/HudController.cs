@@ -304,23 +304,23 @@ namespace AISandbox.UI
             var bgImage = bg.GetComponent<Image>();
             bgImage.color = new Color(1f, 1f, 1f, 0.85f);
 
-            // Checkmark.
-            var check = new GameObject("Checkmark", typeof(RectTransform), typeof(Image));
-            check.transform.SetParent(bg.transform, false);
+            // Checkmark — an actual ✓ glyph (not a filled square) so the "on"
+            // state is unmistakable at a glance.
+            var check = AddText(bg.transform, "Checkmark", "✓", TextAnchor.MiddleCenter, 16);
+            check.color = new Color(0.12f, 0.12f, 0.12f, 1f);
+            check.fontStyle = FontStyle.Bold;
             var checkRect = check.GetComponent<RectTransform>();
             checkRect.anchorMin = Vector2.zero;
             checkRect.anchorMax = Vector2.one;
-            checkRect.offsetMin = new Vector2(2f, 2f);
-            checkRect.offsetMax = new Vector2(-2f, -2f);
-            var checkImage = check.GetComponent<Image>();
-            checkImage.color = new Color(0.15f, 0.15f, 0.15f, 1f);
+            checkRect.offsetMin = Vector2.zero;
+            checkRect.offsetMax = Vector2.zero;
 
             // Label.
             var label = AddText(toggleGo.transform, "Label", labelText, TextAnchor.MiddleLeft, 12);
             StretchLabelRight(label, leftOffset: 32f);
 
             toggle.targetGraphic = bgImage;
-            toggle.graphic = checkImage;
+            toggle.graphic = check; // Text is a Graphic; Toggle fades it in/out on state change
             toggle.isOn = isOn;
             toggle.onValueChanged.AddListener(onChanged);
             return toggle;
