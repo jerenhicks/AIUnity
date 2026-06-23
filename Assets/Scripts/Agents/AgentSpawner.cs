@@ -60,21 +60,25 @@ namespace AISandbox.Agents
                 return;
             }
 
-            // Load LLM config once (shared by all LLM brains). Fall back to Stub on failure.
-            LlmConfig llmConfig = null;
-            if (brainType == BrainType.Llm)
+            // Always try to load LLM config so the user can toggle to LLM at runtime
+            // via the HUD even if they started in Stub mode. Status broadcaster
+            // reflects whether the LLM is reachable; Stub remains the safety net.
+            LlmConfig llmConfig = LlmConfig.Load(LlmConfig.DefaultPath, out string err);
+            if (llmConfig == null)
             {
-                llmConfig = LlmConfig.Load(LlmConfig.DefaultPath, out string err);
-                if (llmConfig == null)
-                {
-                    Debug.LogError($"AgentSpawner: LLM brain selected but config invalid — {err}. Using StubBrain instead.");
-                    brainType = BrainType.Stub;
-                }
-                else
-                {
-                    Debug.Log($"AgentSpawner: LLM brain via {llmConfig.ChatCompletionsUrl} (model {llmConfig.model}).");
-                }
+                Debug.LogWarning($"AgentSpawner: LLM config not loaded — {err}. Stub brain will be used; HUD will show red.");
+                LlmStatus.MarkError(err);
+                if (brainType == BrainType.Llm) brainType = BrainType.Stub;
             }
+            else
+            {
+                Debug.Log($"AgentSpawner: LLM config loaded — {llmConfig.ChatCompletionsUrl} (model {llmConfig.model}).");
+                LlmStatus.MarkConnected("Ready");
+            }
+
+            // Initial selector state mirrors the Inspector toggle. The HUD's checkbox
+            // takes over at runtime once it subscribes.
+            BrainSelector.SetUseLlm(brainType == BrainType.Llm && llmConfig != null);
 
             foreach (var entry in agents)
             {
@@ -82,9 +86,10 @@ namespace AISandbox.Agents
                 go.transform.SetParent(transform, false);
                 var agent = go.AddComponent<Agent>();
                 agent.Init(grid, entry.id, entry.coord, entry.stats, entry.color);
-                agent.Brain = brainType == BrainType.Llm
-                    ? (IAgentBrain)new LlmBrain(llmConfig)
-                    : new StubBrain(entry.id.GetHashCode());
+
+                IAgentBrain llmBrain = llmConfig != null ? new LlmBrain(llmConfig) : null;
+                IAgentBrain stubBrain = new StubBrain(entry.id.GetHashCode());
+                agent.Brain = new SelectableBrain(llmBrain, stubBrain);
 
                 if (writeMemoryFiles)
                 {

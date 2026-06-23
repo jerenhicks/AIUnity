@@ -35,7 +35,9 @@ namespace AISandbox.Brains
 
         /// <summary>
         /// Loads and validates the config. Returns null and sets <paramref name="error"/>
-        /// if the file is missing, unparseable, or still holds the placeholder key.
+        /// to a short, user-facing message (suitable for the HUD) if the file is
+        /// missing, unparseable, or still holds the placeholder key. Full detail
+        /// (paths, exception messages) is logged via <see cref="Debug"/>.
         /// </summary>
         public static LlmConfig Load(string path, out string error)
         {
@@ -43,7 +45,8 @@ namespace AISandbox.Brains
 
             if (!File.Exists(path))
             {
-                error = $"config file not found at {path} (copy llm.config.example.json to llm.config.json)";
+                Debug.LogWarning($"LlmConfig: file not found at {path} (copy llm.config.example.json to llm.config.json).");
+                error = "Config file missing";
                 return null;
             }
 
@@ -54,13 +57,15 @@ namespace AISandbox.Brains
             }
             catch (Exception e)
             {
-                error = $"could not parse {path}: {e.Message}";
+                Debug.LogWarning($"LlmConfig: parse error at {path}: {e.Message}");
+                error = "Config file unreadable";
                 return null;
             }
 
             if (cfg == null || string.IsNullOrWhiteSpace(cfg.baseUrl))
             {
-                error = $"{path} is missing baseUrl";
+                Debug.LogWarning($"LlmConfig: {path} is missing baseUrl.");
+                error = "Config missing baseUrl";
                 return null;
             }
 
@@ -68,7 +73,8 @@ namespace AISandbox.Brains
             // placeholder still in place almost certainly won't work — warn loudly.
             if (cfg.apiKey == "PASTE-YOUR-KEY-HERE")
             {
-                error = $"{path} still has the placeholder apiKey; set a real key (or empty for a local server)";
+                Debug.LogWarning($"LlmConfig: {path} still has the placeholder apiKey; set a real key (or empty for a local server).");
+                error = "API key not set";
                 return null;
             }
 

@@ -503,6 +503,7 @@ MonoBehaviour:
   pauseBetweenTurns: 0.3
   moveSpeed: 4
   verboseLog: 1
+  recentMemoryWindow: 8
   grid: {fileID: 563922172}
 --- !u!1 &803369156
 GameObject:
@@ -533,7 +534,10 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: d287e0412780ed849bd11499e76d7e4e, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::AISandbox.Agents.AgentSpawner
+  brainType: 0
   grid: {fileID: 563922172}
+  writeMemoryFiles: 1
+  memoryDirectoryOverride: 
   agents:
   - id: Ava
     coord:
@@ -617,6 +621,56 @@ Transform:
   m_Children: []
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!1 &870517537
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 870517539}
+  - component: {fileID: 870517538}
+  m_Layer: 0
+  m_Name: HUD
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!114 &870517538
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 870517537}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 314105b2232473b479be623198802962, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::AISandbox.UI.HudController
+  padding: {x: 16, y: 16}
+  panelWidth: 240
+  connectedColor: {r: 0.25, g: 0.78, b: 0.35, a: 1}
+  waitingColor: {r: 0.95, g: 0.78, b: 0.2, a: 1}
+  errorColor: {r: 0.86, g: 0.27, b: 0.27, a: 1}
+  unknownColor: {r: 0.55, g: 0.55, b: 0.55, a: 1}
+--- !u!4 &870517539
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 870517537}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: -0, y: 0, z: -0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1660057539 &9223372036854775807
 SceneRoots:
   m_ObjectHideFlags: 0
@@ -627,3 +681,4 @@ SceneRoots:
   - {fileID: 563922173}
   - {fileID: 803369158}
   - {fileID: 651435254}
+  - {fileID: 870517539}

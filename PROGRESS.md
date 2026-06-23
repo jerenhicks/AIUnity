@@ -2,7 +2,46 @@
 
 > Running log of what's done and what's next. Newest at top.
 
-## Status: Phase 6 (LLM brain) — code authored, awaiting setup + test
+## Status: HUD — LLM status indicator + turn controls
+
+### What the HUD does (current state)
+Two panels are built at runtime by `UI/HudController` (Screen Space Overlay canvas; no editor setup required beyond adding a HUD GameObject with the component):
+
+**Top-left panel — LLM status**
+- Colored dot + short label: green "LLM: Ready", yellow "LLM: Thinking…", red "LLM: <short error>". Error strings are human-readable: `Config file missing`, `API key not set`, `Config missing baseUrl`, `Config file unreadable`, `Connection failed`, `Bad model response`. Full paths/exception text still go to the Console via `Debug.LogWarning`.
+- "Use LLM" checkbox below the dot. Interactable in the green and red states; **locked** while a request is in flight (yellow), per spec.
+
+**Top-right panel — turn controls**
+- `▶ Next` button — triggers `TurnManager.StepRound()` (equivalent to pressing Space). Interactable only when *all three* are true: agents are idle, continuous toggle is off, and the LLM isn't blocked.
+- Colored status text — "Agents working…" (yellow) while a round is running; "Agents ready" (green) between rounds.
+- "Allow continuous actions" checkbox — writes back to `TurnManager.mode`. When on, rounds loop back-to-back and the Play button greys out.
+
+Both panels sit flush in their corners (zero padding) and the EventSystem is created automatically (with `InputSystemUIInputModule` since the project uses the new Input System).
+
+### Code surface added/changed
+- **`Brains/LlmStatus`** — process-wide static broadcaster, three real states (`Connected` / `Waiting` / `Error`) + initial `Unknown`. Anything publishes via `MarkConnected / MarkWaiting / MarkError`; the HUD subscribes to `Changed`. Messages are intentionally short (≲ 24 chars) for the label.
+- **`Brains/BrainSelector`** — process-wide static `UseLlm` flag with `Changed` event. The HUD's "Use LLM" toggle writes here; `SelectableBrain` reads here.
+- **`Brains/SelectableBrain`** — per-agent wrapper that dispatches each `Decide(...)` based on `BrainSelector.UseLlm`:
+  - `false` → stub brain (the safe default for "built-in intelligence")
+  - `true` with a working LLM brain → LLM
+  - `true` but no LLM brain available → **no-op Observe with note `[no LLM available]`**. We do *not* silently fall back to the stub — the user explicitly asked for LLM.
+- **`LlmBrain`** — publishes `Waiting` before each request, `Connected` on success, `Error` on transport failure / parse failure / missing config. Existing fallback-to-observe safety remains so an individual failure mid-round doesn't stall the sim.
+- **`Brains/LlmConfig`** — error strings rewritten to short user-facing labels (`"Config file missing"`, `"API key not set"`, etc.); the path / exception detail moved to `Debug.LogWarning` so it stays in the Console for debugging.
+- **`Agents/AgentSpawner`** — always loads `llm.config.json` so the runtime toggle has both brains ready. Inspector `Brain Type` now only seeds the initial value of `BrainSelector.UseLlm`. Each agent gets a `SelectableBrain(llm, stub)`.
+- **`Sim/TurnManager`** — exposes `public bool IsBusy` for the HUD. New `IsLlmBlocked()` gate added: when `BrainSelector.UseLlm && LlmStatus.Current == Error`, both `ContinuousLoop` and `StepRound` short-circuit — no rounds run, no decisions, no movement. As soon as the LLM recovers *or* "Use LLM" is unchecked, the loop resumes.
+- **`UI/HudController`** — runtime canvas builder. Panels hardcoded to flush top corners. Creates an EventSystem if one isn't present. Polls TurnManager state in `Update()` to keep the agent status label and Play button enabled-state in sync.
+
+### Editor steps for the HUD
+1. Let Unity recompile.
+2. Create an empty GameObject in the scene named **HUD** → Add Component → **HudController**. (One-time only; an `EventSystem` GameObject is created at runtime by the component if it's missing.)
+3. Press **Play**. You should see both panels flush to the top corners.
+   - Left: LLM status. **Green** = config loaded / last request succeeded. **Yellow** = a request is in flight; "Use LLM" locks. **Red** = config missing/invalid or last request failed; "Use LLM" stays selectable.
+   - Right: turn controls. **`▶ Next`** to step manually, **"Allow continuous actions"** to loop rounds back-to-back. Agent status flips between yellow "working…" and green "ready".
+4. Behavior to verify: ticking "Use LLM" when the LLM is red should *freeze* the sim (no agent movement) until either the LLM recovers or the toggle is flipped back off.
+
+---
+
+## Status (prior): Phase 6 (LLM brain) — code authored, awaiting setup + test
 
 ### Phase 6 — the LLM brain
 - `Brains/LlmConfig` — loads `llm.config.json` (project root, git-ignored): `baseUrl`, `apiKey`, `model`, `temperature`, `maxTokens`, `timeoutSeconds`. OpenAI-compatible format (OpenAI, OpenRouter, Together, LM Studio, local Ollama `/v1`, …).

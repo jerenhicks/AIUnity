@@ -28,6 +28,7 @@ namespace AISandbox.Brains
         {
             if (_config == null)
             {
+                LlmStatus.MarkError("No config loaded");
                 commit(Fallback("no LLM config"));
                 yield break;
             }
@@ -43,17 +44,23 @@ namespace AISandbox.Brains
                     req.SetRequestHeader("Authorization", "Bearer " + _config.apiKey);
                 req.timeout = Mathf.Max(1, _config.timeoutSeconds);
 
+                LlmStatus.MarkWaiting("Thinking…");
                 yield return req.SendWebRequest();
 
                 if (req.result != UnityWebRequest.Result.Success)
                 {
                     Debug.LogWarning($"LlmBrain ({p.SelfId}): request failed — {req.error}. Falling back to observe.");
+                    LlmStatus.MarkError("Connection failed");
                     commit(Fallback("request failed"));
                     yield break;
                 }
 
                 string content = ExtractAssistantContent(req.downloadHandler.text);
                 AgentAction action = ParseAction(content, p);
+                if (action != null)
+                    LlmStatus.MarkConnected("Ready");
+                else
+                    LlmStatus.MarkError("Bad model response");
                 commit(action ?? Fallback("could not parse response"));
             }
         }

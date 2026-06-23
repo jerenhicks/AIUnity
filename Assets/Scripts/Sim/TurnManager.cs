@@ -1,6 +1,7 @@
 using System.Collections;
 using System.Collections.Generic;
 using AISandbox.Agents;
+using AISandbox.Brains;
 using AISandbox.Memory;
 using AISandbox.World;
 using UnityEngine;
@@ -43,6 +44,9 @@ namespace AISandbox.Sim
         private bool _loopRunning; // the continuous loop coroutine is active
         private int _round;
 
+        /// <summary>True while a round is currently running; false between rounds.</summary>
+        public bool IsBusy => _busy;
+
         // Messages each agent will hear on its next turn.
         private readonly Dictionary<Agent, List<HeardMessage>> _inbox =
             new Dictionary<Agent, List<HeardMessage>>();
@@ -64,9 +68,19 @@ namespace AISandbox.Sim
             else // Manual
             {
                 var kb = Keyboard.current;
-                if (!_busy && kb != null && kb.spaceKey.wasPressedThisFrame)
+                if (!_busy && !IsLlmBlocked() && kb != null && kb.spaceKey.wasPressedThisFrame)
                     StartCoroutine(StepRound());
             }
+        }
+
+        /// <summary>
+        /// True when the user has the HUD's "Use LLM" toggle on but the LLM is
+        /// currently errored / unreachable. In that state we don't run rounds —
+        /// the agents make no decisions and don't move, per spec.
+        /// </summary>
+        private static bool IsLlmBlocked()
+        {
+            return BrainSelector.UseLlm && LlmStatus.Current == LlmStatus.State.Error;
         }
 
         private IEnumerator ContinuousLoop()
@@ -74,6 +88,11 @@ namespace AISandbox.Sim
             _loopRunning = true;
             while (mode == RunMode.Continuous)
             {
+                if (IsLlmBlocked())
+                {
+                    yield return null; // wait until either the LLM recovers or the toggle is flipped off
+                    continue;
+                }
                 yield return StepRound();
                 yield return null; // guarantee at least one frame per round
             }
@@ -83,7 +102,7 @@ namespace AISandbox.Sim
         /// <summary>Runs one full round: every agent takes one turn, in order.</summary>
         public IEnumerator StepRound()
         {
-            if (_busy || grid == null) yield break;
+            if (_busy || grid == null || IsLlmBlocked()) yield break;
             _busy = true;
             _round++;
 
