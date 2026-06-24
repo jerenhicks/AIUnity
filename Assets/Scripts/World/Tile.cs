@@ -15,10 +15,19 @@ namespace AISandbox.World
 
         public bool IsOccupied => Occupant != null;
 
+        /// <summary>This tile's terrain type (null if the world isn't biome-generated).</summary>
+        public Biome Biome { get; private set; }
+
         public void Init(GridCoord coord)
         {
             Coord = coord;
             name = $"Tile {coord}";
+        }
+
+        public void SetBiome(Biome biome)
+        {
+            Biome = biome;
+            if (biome != null) name = $"Tile {Coord} [{biome.name}]";
         }
     }
 }

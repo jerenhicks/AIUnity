@@ -1,5 +1,6 @@
 using System;
 using System.Collections;
+using System.Collections.Generic;
 using System.Text;
 using AISandbox.Sim;
 using AISandbox.World;
@@ -24,7 +25,7 @@ namespace AISandbox.Brains
             _config = config;
         }
 
-        public IEnumerator Decide(AgentPerception p, Action<AgentAction> commit)
+        public IEnumerator Decide(AgentPerception p, Action<AgentTurn> commit)
         {
             if (_config == null)
             {
@@ -56,12 +57,12 @@ namespace AISandbox.Brains
                 }
 
                 string content = ExtractAssistantContent(req.downloadHandler.text);
-                AgentAction action = ParseAction(content, p);
-                if (action != null)
+                AgentTurn plan = ParsePlan(content, p);
+                if (plan != null)
                     LlmStatus.MarkConnected("Ready");
                 else
                     LlmStatus.MarkError("Bad model response");
-                commit(action ?? Fallback("could not parse response"));
+                commit(plan ?? Fallback("could not parse response"));
             }
         }
 
@@ -89,15 +90,17 @@ namespace AISandbox.Brains
         {
             return
                 $"You are {p.SelfId}, an autonomous agent living in a shared {p.WorldWidth}x{p.WorldHeight} tile grid world with other agents. " +
-                "You experience the world one turn at a time. Each turn you choose exactly ONE action:\n" +
+                "You act one turn at a time. In a single turn you may take up to THREE steps — at most one move, one talk, and one observe — in any order you choose:\n" +
                 $"- move: walk to a tile within Manhattan distance {p.MoveRange} of your position (cardinal steps only); you cannot enter a tile occupied by another agent.\n" +
-                $"- talk: shout a short message; only agents within {p.TalkRange} tiles hear it.\n" +
-                "- observe: take in your surroundings and do nothing else this turn.\n" +
-                $"You can see other agents within {p.ObserveRange} tiles. You are curious and social: explore, seek out others, communicate, and react to what they say and do.\n" +
-                "Respond with ONLY a single JSON object and no other text, in one of these exact shapes:\n" +
-                "{\"action\":\"move\",\"x\":<int>,\"y\":<int>,\"note\":\"<short reason>\"}\n" +
-                "{\"action\":\"talk\",\"message\":\"<what you say>\",\"note\":\"<short reason>\"}\n" +
-                "{\"action\":\"observe\",\"note\":\"<short reason>\"}";
+                $"- talk: shout a short message; only agents within {p.TalkRange} tiles hear it. Order matters — talking before vs after moving reaches different agents.\n" +
+                "- observe: note something about the terrain or your surroundings; this is recorded to your memory.\n" +
+                $"You can see other agents and terrain within {p.ObserveRange} tiles. You are curious and social: explore, seek out others, communicate, and react to what they say and do.\n" +
+                "Respond with ONLY a JSON object of this exact shape and no other text. Include only the steps you want, in the order you intend them to happen:\n" +
+                "{\"steps\":[" +
+                "{\"action\":\"move\",\"x\":<int>,\"y\":<int>,\"note\":\"<short reason>\"}," +
+                "{\"action\":\"talk\",\"message\":\"<what you say>\",\"note\":\"<short reason>\"}," +
+                "{\"action\":\"observe\",\"note\":\"<what you notice>\"}" +
+                "]}";
         }
 
         private static string UserPrompt(AgentPerception p)
@@ -105,6 +108,14 @@ namespace AISandbox.Brains
             var sb = new StringBuilder();
             sb.AppendLine($"Your position: ({p.SelfCoord.x}, {p.SelfCoord.y}).");
             sb.AppendLine($"World bounds: x 0..{p.WorldWidth - 1}, y 0..{p.WorldHeight - 1}. Move range: {p.MoveRange} (Manhattan).");
+
+            if (!string.IsNullOrEmpty(p.SelfBiome))
+            {
+                string desc = string.IsNullOrEmpty(p.SelfBiomeDescription) ? "" : $" — {p.SelfBiomeDescription}";
+                sb.AppendLine($"You are standing on: {p.SelfBiome}{desc}.");
+            }
+            if (p.NearbyBiomes != null && p.NearbyBiomes.Count > 0)
+                sb.AppendLine($"Nearby terrain: {string.Join(", ", p.NearbyBiomes)}.");
 
             if (p.VisibleAgents.Count > 0)
             {
@@ -152,7 +163,7 @@ namespace AISandbox.Brains
             return null;
         }
 
-        private static AgentAction ParseAction(string content, AgentPerception p)
+        private static AgentTurn ParsePlan(string content, AgentPerception p)
         {
             if (string.IsNullOrEmpty(content)) return null;
 
@@ -162,33 +173,41 @@ namespace AISandbox.Brains
             if (start < 0 || end <= start) return null;
             string json = content.Substring(start, end - start + 1);
 
-            ActionJson aj;
-            try { aj = JsonUtility.FromJson<ActionJson>(json); }
+            PlanJson pj;
+            try { pj = JsonUtility.FromJson<PlanJson>(json); }
             catch { return null; }
-            if (aj == null || string.IsNullOrEmpty(aj.action)) return null;
+            if (pj == null || pj.steps == null || pj.steps.Length == 0) return null;
 
-            AgentAction action;
-            switch (aj.action.Trim().ToLowerInvariant())
+            var turn = new AgentTurn();
+            var seenTypes = new HashSet<string>();
+
+            foreach (var s in pj.steps)
             {
-                case "move":
-                    var requested = new GridCoord(aj.x, aj.y);
-                    var target = ResolveReachable(p, requested);
-                    action = target.HasValue ? AgentAction.Move(target.Value) : AgentAction.Observe();
-                    break;
+                if (s == null || string.IsNullOrEmpty(s.action)) continue;
+                string kind = s.action.Trim().ToLowerInvariant();
+                if (seenTypes.Contains(kind)) continue; // at most one of each type
 
-                case "talk":
-                    action = string.IsNullOrWhiteSpace(aj.message)
-                        ? AgentAction.Observe()
-                        : AgentAction.Talk(aj.message.Trim());
-                    break;
+                AgentAction step = kind switch
+                {
+                    "move" => BuildMove(s, p),
+                    "talk" => string.IsNullOrWhiteSpace(s.message) ? null : AgentAction.Talk(s.message.Trim()),
+                    "observe" => AgentAction.Observe(),
+                    _ => null,
+                };
+                if (step == null) continue;
 
-                default: // "observe" or anything unexpected
-                    action = AgentAction.Observe();
-                    break;
+                step.Note = s.note;
+                seenTypes.Add(kind);
+                turn.Add(step);
             }
 
-            action.Note = aj.note;
-            return action;
+            return turn.IsEmpty ? null : turn;
+        }
+
+        private static AgentAction BuildMove(StepJson s, AgentPerception p)
+        {
+            var target = ResolveReachable(p, new GridCoord(s.x, s.y));
+            return target.HasValue ? AgentAction.Move(target.Value) : null;
         }
 
         /// <summary>
@@ -211,11 +230,11 @@ namespace AISandbox.Brains
             return best;
         }
 
-        private static AgentAction Fallback(string why)
+        private static AgentTurn Fallback(string why)
         {
             var a = AgentAction.Observe();
             a.Note = $"[fallback: {why}]";
-            return a;
+            return AgentTurn.Of(a);
         }
 
         // ---- JSON DTOs ----------------------------------------------------------
@@ -235,8 +254,10 @@ namespace AISandbox.Brains
         [Serializable] private class Choice { public RespMessage message; }
         [Serializable] private class RespMessage { public string content; }
 
+        [Serializable] private class PlanJson { public StepJson[] steps; }
+
         [Serializable]
-        private class ActionJson
+        private class StepJson
         {
             public string action;
             public int x;

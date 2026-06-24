@@ -12,13 +12,20 @@
 
 ```
 Assets/Scripts/
-  World/        Grid, tiles, coordinates, world state
+  World/        Grid, tiles, coordinates, world state, generation
     GridConfig.cs        Tile size + grid dimensions
     GridCoord.cs         Integer (x, y) + Chebyshev/Manhattan helpers
-    Tile.cs              One tile; tracks its occupant
-    WorldGrid.cs         Spawns the visible grid; tile lookup
+    Tile.cs              One tile; tracks its occupant and biome
+    WorldGrid.cs         Spawns the visible grid; colors tiles by biome; tile lookup
     ITileOccupant.cs     Anything that sits on a tile
     MaterialUtil.cs      Shared material helpers
+    Biome.cs             Terrain type data (name, color, description, size rules)
+    BiomeMap.cs          Generator's per-coordinate biome canvas
+    WorldGenerator.cs    Runs the generation pass pipeline; returns a BiomeMap
+    Generation/
+      IWorldGenPass.cs   One generation rule (mutates the BiomeMap)
+      RegionGrowthPass.cs  Contiguous biome blobs within min/max size
+      RiverPass.cs         Meandering connected water path
 
   Agents/       Agent entity, stats, spawning
     AgentStats.cs        Move / Observe / Talk ranges (1–6)
@@ -34,10 +41,11 @@ Assets/Scripts/
     BrainSelector.cs     Static UseLlm flag with Changed event
     SelectableBrain.cs   Per-agent wrapper that dispatches LLM vs stub
 
-  Sim/          Tick loop, perception, action data
-    AgentAction.cs       Move / Observe / Talk intent + factory
-    AgentPerception.cs   Read-only snapshot a brain decides from
-    TurnManager.cs       Turn-based driver; exposes IsBusy; pauses when LLM blocked
+  Sim/          Turn loop, perception, action data
+    AgentAction.cs       A single step (Move / Talk / Observe) + factory
+    AgentTurn.cs         An ordered set of steps (≤1 of each type) per turn
+    AgentPerception.cs   Read-only snapshot a brain decides from (incl. terrain)
+    TurnManager.cs       Turn-based driver; resolves composite turns; IsBusy; LLM gate
 
   Memory/       Per-agent context file I/O
     AgentMemory.cs       Writes per-agent JSON + .md every turn
@@ -46,9 +54,12 @@ Assets/Scripts/
   View/         Camera + visual controls
     IsoCameraController.cs   WASD/MMB pan, scroll zoom, Q/E rotate
 
-  UI/           Runtime HUD
+  UI/           Runtime HUD + agent inspector
     HudController.cs     Builds canvas + both panels at Play; no editor setup
+    AgentInspector.cs    Click-select an agent (outline) + lower-left info panel
 ```
+
+Plus `Assets/Shaders/AgentOutline.shader` — a URP inverted-hull outline used by the selection highlight (`Agent.SetSelected`).
 
 ## Core Design Principles
 
@@ -67,8 +78,11 @@ Assets/Scripts/
 - **Phase 4 — Actions (Move / Observe / Talk)** *(done)*: Real resolution honoring stat ranges + Chebyshev/Manhattan distance. Animated cardinal-only walks.
 - **Phase 5 — Memory / Context Files** *(done)*: Each agent reads/writes its own context file every turn (JSON + .md mirror in `<projectRoot>/AgentMemory/`).
 - **Phase 6 — LLM Brain** *(code authored; awaiting real-LLM connection)*: `LlmConfig`, `LlmBrain`. OpenAI-compatible chat endpoint, strict-JSON action parsing, safe-fallback to Observe on any error.
-- **Phase 6.5 — HUD + runtime brain switching** *(done)*: `LlmStatus`, `BrainSelector`, `SelectableBrain`, `UI/HudController`. Two-panel runtime HUD: LLM status indicator + Use LLM toggle on the left; Play button, agent status, and continuous toggle on the right. `TurnManager` pauses when LLM is selected-and-errored. Pre-LLM baseline UI work before hooking up to a real model.
-- **Phase 7+ — Connect to a real LLM and expand actions** *(next)*: Set `llm.config.json` to a real endpoint, exercise the HUD's green→yellow→green flow, then layer in new action types (build, gather, …).
+- **Phase 6.5 — HUD + runtime brain switching** *(done)*: `LlmStatus`, `BrainSelector`, `SelectableBrain`, `UI/HudController`. Two-panel runtime HUD: LLM status indicator + Use LLM toggle on the left; Play button, agent status, and continuous toggle on the right. `TurnManager` pauses when LLM is selected-and-errored.
+- **Phase 6.6 — Agent inspector** *(done)*: `Shaders/AgentOutline.shader`, `Agent.SetSelected`, `UI/AgentInspector`. Left-click selects an agent (outline) and shows a lower-left info panel; clicking empty space clears it.
+- **Phase 7 — Biomes + world generation** *(done)*: `Biome`, `BiomeMap`, `WorldGenerator`, `Generation/` pass pipeline (region growth + rivers). `WorldGrid` colors tiles by biome; `Tile` stores its biome. Flat colors for now; height/doodads deferred.
+- **Phase 8 — Terrain perception + composite turns** *(done)*: `AgentPerception` carries the biome underfoot + nearby biomes; the LLM prompt includes terrain. Turns became composite — the brain returns an `AgentTurn` (≤1 Move + ≤1 Talk + ≤1 Observe, ordered); `TurnManager` resolves the steps in order and records one memory entry per turn (with biome).
+- **Phase 9+ — Connect a real LLM and expand actions** *(next)*: point `llm.config.json` at a real endpoint, exercise the HUD flow, then add new action types (build, gather, …) and richer tile visuals (height, doodads).
 
 ## Coordinate ↔ World Position
 

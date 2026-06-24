@@ -31,7 +31,7 @@ namespace AISandbox.Brains
 
         public bool LlmAvailable => _llm != null;
 
-        public IEnumerator Decide(AgentPerception perception, Action<AgentAction> commit)
+        public IEnumerator Decide(AgentPerception perception, Action<AgentTurn> commit)
         {
             if (BrainSelector.UseLlm)
             {
@@ -41,11 +41,11 @@ namespace AISandbox.Brains
             return _stub.Decide(perception, commit);
         }
 
-        private static IEnumerator DoNothing(Action<AgentAction> commit)
+        private static IEnumerator DoNothing(Action<AgentTurn> commit)
         {
             var a = AgentAction.Observe();
             a.Note = "[no LLM available]";
-            commit(a);
+            commit(AgentTurn.Of(a));
             yield break;
         }
     }

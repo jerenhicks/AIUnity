@@ -125,34 +125,53 @@ namespace AISandbox.Sim
         {
             var perception = BuildPerception(agent, all);
 
-            AgentAction chosen = null;
+            AgentTurn plan = null;
             // Fully waits here — a real LLM brain yields its web request and we
-            // simply don't advance until it commits an action.
-            yield return agent.Brain.Decide(perception, a => chosen = a);
-            if (chosen == null) yield break;
+            // simply don't advance until it commits a turn.
+            yield return agent.Brain.Decide(perception, t => plan = t);
 
-            switch (chosen.Type)
+            var summaries = new List<string>();
+            var notes = new List<string>();
+            var doneTypes = new HashSet<ActionType>();
+
+            if (plan != null)
             {
-                case ActionType.Move:
-                    yield return agent.MoveTo(chosen.MoveTarget, moveSpeed, ok =>
-                        Log(agent, ok ? $"moved to {chosen.MoveTarget}"
-                                      : $"tried to move to {chosen.MoveTarget} (blocked)"));
-                    break;
+                foreach (var step in plan.Steps)
+                {
+                    if (step == null || doneTypes.Contains(step.Type)) continue; // one per type
+                    doneTypes.Add(step.Type);
 
-                case ActionType.Talk:
-                    DeliverTalk(agent, chosen.Message, all);
-                    break;
+                    switch (step.Type)
+                    {
+                        case ActionType.Move:
+                            bool moved = false;
+                            var dest = step.MoveTarget;
+                            yield return agent.MoveTo(dest, moveSpeed, ok => moved = ok);
+                            summaries.Add(moved ? $"Move→{dest}" : $"Move→{dest} (blocked)");
+                            Log(agent, moved ? $"moved to {dest}" : $"tried to move to {dest} (blocked)");
+                            break;
 
-                case ActionType.Observe:
-                    Log(agent, $"observed (sees {perception.VisibleAgents.Count} agent(s) within {agent.Stats.Observe})");
-                    break;
+                        case ActionType.Talk:
+                            DeliverTalk(agent, step.Message, all);
+                            summaries.Add($"Talk:\"{step.Message}\"");
+                            break;
+
+                        case ActionType.Observe:
+                            summaries.Add("Observe");
+                            Log(agent, $"observed (sees {perception.VisibleAgents.Count} agent(s) within {agent.Stats.Observe})");
+                            break;
+                    }
+
+                    if (!string.IsNullOrEmpty(step.Note)) notes.Add($"{step.Type}: {step.Note}");
+                }
             }
 
-            RecordTurn(agent, chosen, perception);
+            if (summaries.Count == 0) summaries.Add("idle");
+            RecordTurn(agent, summaries, notes, perception);
         }
 
-        /// <summary>Appends this turn to the agent's memory / context file.</summary>
-        private void RecordTurn(Agent agent, AgentAction action, AgentPerception perception)
+        /// <summary>Appends this turn (all its steps) to the agent's memory / context file.</summary>
+        private void RecordTurn(Agent agent, List<string> summaries, List<string> notes, AgentPerception perception)
         {
             if (agent.Memory == null) return;
 
@@ -173,12 +192,13 @@ namespace AISandbox.Sim
             agent.Memory.Append(new TurnRecord
             {
                 round = _round,
-                action = action.ToString(),
+                action = string.Join("; ", summaries),
                 x = agent.Coord.x,
                 y = agent.Coord.y,
+                biome = perception.SelfBiome,
                 observed = observed,
                 heard = heard,
-                note = action.Note,
+                note = notes.Count > 0 ? string.Join(" | ", notes) : null,
             });
         }
 
@@ -222,6 +242,27 @@ namespace AISandbox.Sim
                 if (d <= stats.Observe)
                     p.VisibleAgents.Add(new ObservedAgent { Id = other.AgentId, Coord = other.Coord, Distance = d });
             }
+
+            // Terrain: the biome underfoot, plus distinct other biomes within Observe range.
+            var selfTile = grid.GetTile(self);
+            if (selfTile != null && selfTile.Biome != null)
+            {
+                p.SelfBiome = selfTile.Biome.name;
+                p.SelfBiomeDescription = selfTile.Biome.description;
+            }
+            var nearby = new HashSet<string>();
+            for (int dx = -stats.Observe; dx <= stats.Observe; dx++)
+            {
+                for (int dy = -stats.Observe; dy <= stats.Observe; dy++)
+                {
+                    var c = new GridCoord(self.x + dx, self.y + dy);
+                    if (!grid.Config.InBounds(c)) continue;
+                    var t = grid.GetTile(c);
+                    if (t != null && t.Biome != null && t.Biome.name != p.SelfBiome)
+                        nearby.Add(t.Biome.name);
+                }
+            }
+            p.NearbyBiomes = new List<string>(nearby);
 
             if (_inbox.TryGetValue(agent, out var heard) && heard.Count > 0)
             {

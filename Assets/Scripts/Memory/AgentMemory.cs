@@ -78,7 +78,8 @@ namespace AISandbox.Memory
 
             foreach (var r in Data.history)
             {
-                sb.AppendLine($"## Round {r.round} — ended at ({r.x}, {r.y})");
+                string where = string.IsNullOrEmpty(r.biome) ? $"({r.x}, {r.y})" : $"({r.x}, {r.y}) on {r.biome}";
+                sb.AppendLine($"## Round {r.round} — ended at {where}");
                 sb.AppendLine($"- Action: {r.action}");
                 sb.AppendLine($"- Saw: {Join(r.observed)}");
                 sb.AppendLine($"- Heard: {Join(r.heard)}");

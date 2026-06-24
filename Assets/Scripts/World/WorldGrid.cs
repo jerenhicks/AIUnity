@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using UnityEngine;
 
 namespace AISandbox.World
@@ -5,11 +6,16 @@ namespace AISandbox.World
     /// <summary>
     /// Builds and owns the tile grid. Spawns a visible N x M board of tile slabs
     /// at Play (no prefabs or art assets required) and provides coordinate lookups.
+    /// If a <see cref="WorldGenerator"/> is present, tiles are colored by biome;
+    /// otherwise they fall back to a plain checkerboard.
     /// Attach this to an empty GameObject named "World".
     /// </summary>
     public class WorldGrid : MonoBehaviour
     {
         [SerializeField] private GridConfig config = new GridConfig();
+
+        [Tooltip("Optional. Leave empty to auto-find one on this object or in the scene.")]
+        [SerializeField] private WorldGenerator generator;
 
         public GridConfig Config => config;
         public int Width => config.width;
@@ -18,6 +24,7 @@ namespace AISandbox.World
         private Tile[,] _tiles;
         private Material _matLight;
         private Material _matDark;
+        private readonly Dictionary<Biome, Material> _biomeMaterials = new Dictionary<Biome, Material>();
 
         private void Awake()
         {
@@ -30,6 +37,12 @@ namespace AISandbox.World
 
             _matLight = MakeMaterial(config.colorLight);
             _matDark = MakeMaterial(config.colorDark);
+            _biomeMaterials.Clear();
+
+            // Generate a biome map if a generator is available; otherwise checkerboard.
+            if (generator == null) generator = GetComponent<WorldGenerator>();
+            if (generator == null) generator = FindFirstObjectByType<WorldGenerator>();
+            BiomeMap biomeMap = generator != null ? generator.Generate(config.width, config.height) : null;
 
             _tiles = new Tile[config.width, config.height];
 
@@ -37,12 +50,13 @@ namespace AISandbox.World
             {
                 for (int y = 0; y < config.height; y++)
                 {
-                    _tiles[x, y] = CreateTile(new GridCoord(x, y));
+                    Biome biome = biomeMap != null ? biomeMap.Get(x, y) : null;
+                    _tiles[x, y] = CreateTile(new GridCoord(x, y), biome);
                 }
             }
         }
 
-        private Tile CreateTile(GridCoord coord)
+        private Tile CreateTile(GridCoord coord, Biome biome)
         {
             var go = GameObject.CreatePrimitive(PrimitiveType.Cube);
             go.transform.SetParent(transform, false);
@@ -53,12 +67,25 @@ namespace AISandbox.World
             go.transform.localPosition = CoordToLocalPosition(coord);
 
             var renderer = go.GetComponent<MeshRenderer>();
-            bool isLight = (coord.x + coord.y) % 2 == 0;
-            renderer.sharedMaterial = isLight ? _matLight : _matDark;
+            renderer.sharedMaterial = biome != null
+                ? GetBiomeMaterial(biome)
+                : ((coord.x + coord.y) % 2 == 0 ? _matLight : _matDark);
 
             var tile = go.AddComponent<Tile>();
             tile.Init(coord);
+            tile.SetBiome(biome);
             return tile;
+        }
+
+        // One shared material per biome, built on demand.
+        private Material GetBiomeMaterial(Biome biome)
+        {
+            if (!_biomeMaterials.TryGetValue(biome, out var mat))
+            {
+                mat = MaterialUtil.CreateColored(biome.color);
+                _biomeMaterials[biome] = mat;
+            }
+            return mat;
         }
 
         /// <summary>Local position of a tile's center on the ground plane (XZ).</summary>

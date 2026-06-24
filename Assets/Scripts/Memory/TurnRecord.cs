@@ -13,12 +13,13 @@ namespace AISandbox.Memory
     public class TurnRecord
     {
         public int round;
-        public string action;     // e.g. "Move -> (3, 4)", "Talk: \"Hello?\"", "Observe"
+        public string action;     // joined steps this turn, e.g. "Move→(3, 4); Talk:\"Hi\"; Observe"
         public int x;             // position after the turn
         public int y;
+        public string biome;      // terrain the agent ended the turn on
         public string[] observed; // other agents seen this turn
         public string[] heard;    // messages heard this turn
-        public string note;       // optional reflection (used by the LLM brain later)
+        public string note;       // optional reflection(s) the brain attached
     }
 
     /// <summary>

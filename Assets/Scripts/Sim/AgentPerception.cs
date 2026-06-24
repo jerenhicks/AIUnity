@@ -37,6 +37,13 @@ namespace AISandbox.Sim
         public int ObserveRange;
         public int TalkRange;
 
+        /// <summary>The biome the agent is currently standing on (null if ungenerated world).</summary>
+        public string SelfBiome;
+        public string SelfBiomeDescription;
+
+        /// <summary>Distinct other biome names visible within Observe range.</summary>
+        public List<string> NearbyBiomes = new List<string>();
+
         /// <summary>Empty tiles reachable this turn (includes current tile = "stay").</summary>
         public List<GridCoord> ReachableTiles = new List<GridCoord>();
 

@@ -2,7 +2,24 @@
 
 > Running log of what's done and what's next. Newest at top.
 
-## Status: HUD — LLM status indicator + turn controls
+## Status: World generation + terrain + composite turns
+
+### What changed
+- **Biomes & world generation** — `World/Biome`, `BiomeMap`, `WorldGenerator`, and a `Generation/` pass pipeline (`RegionGrowthPass` = contiguous blobs within each biome's min/max size; `RiverPass` = meandering edge-to-edge water). `WorldGrid` auto-finds a `WorldGenerator`, colors tiles by biome (per-biome material cache), and falls back to the old checkerboard if none. `Tile` now stores its `Biome`. Seed 0 = fresh each run. Tunable entirely in the Inspector.
+- **Terrain perception** — `AgentPerception` now carries `SelfBiome`, `SelfBiomeDescription`, and `NearbyBiomes`; `TurnManager.BuildPerception` fills them from tile biomes, and `LlmBrain` puts terrain in the prompt. Agents genuinely notice where they are.
+- **Composite turns** — a turn is now **Move + Talk + Observe** (≤1 each, any order) instead of one action. `IAgentBrain.Decide` commits an `AgentTurn` (ordered `AgentAction` steps). Updated `StubBrain`, `LlmBrain` (prompt asks for `{"steps":[…]}`), `SelectableBrain`, and `TurnManager` (resolves steps in order — talk uses post-move position). Memory records one entry per turn (joined step summary + notes + `biome`).
+
+### Editor steps
+- Add the **WorldGenerator** component to the **World** object (the one with WorldGrid). Tune biomes/seed/rivers in the Inspector.
+- Everything else: just let Unity recompile. No other hookup needed.
+
+### Earlier (already committed)
+- **Agent inspector** — click-select an agent (URP outline) + lower-left info panel; click empty space clears. (`Shaders/AgentOutline.shader`, `Agent.SetSelected`, `UI/AgentInspector`.)
+- **Checkmark toggles** — HUD checkboxes show a ✓ glyph instead of a filled square.
+
+---
+
+## Status (prior): HUD — LLM status indicator + turn controls
 
 ### What the HUD does (current state)
 Two panels are built at runtime by `UI/HudController` (Screen Space Overlay canvas; no editor setup required beyond adding a HUD GameObject with the component):

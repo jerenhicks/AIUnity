@@ -413,6 +413,7 @@ GameObject:
   m_Component:
   - component: {fileID: 563922173}
   - component: {fileID: 563922172}
+  - component: {fileID: 563922174}
   m_Layer: 0
   m_Name: World
   m_TagString: Untagged
@@ -440,6 +441,7 @@ MonoBehaviour:
     tileThickness: 0.1
     colorLight: {r: 0.8, g: 0.8, b: 0.85, a: 1}
     colorDark: {r: 0.62, g: 0.62, b: 0.7, a: 1}
+  generator: {fileID: 563922174}
 --- !u!4 &563922173
 Transform:
   m_ObjectHideFlags: 0
@@ -455,6 +457,55 @@ Transform:
   m_Children: []
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &563922174
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 563922171}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: d2af0d33020c1eb4fa49c752e7fa225e, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::AISandbox.World.WorldGenerator
+  seed: 0
+  baseBiomes:
+  - name: Plains
+    color: {r: 0.45, g: 0.7, b: 0.35, a: 1}
+    description: open grassy plains
+    weight: 3
+    minRegionSize: 10
+    maxRegionSize: 30
+  - name: Forest
+    color: {r: 0.2, g: 0.45, b: 0.25, a: 1}
+    description: dense forest
+    weight: 1.5
+    minRegionSize: 6
+    maxRegionSize: 18
+  - name: Desert
+    color: {r: 0.85, g: 0.78, b: 0.45, a: 1}
+    description: arid sandy desert
+    weight: 1.5
+    minRegionSize: 6
+    maxRegionSize: 20
+  - name: Mountains
+    color: {r: 0.55, g: 0.52, b: 0.5, a: 1}
+    description: rocky mountains
+    weight: 1
+    minRegionSize: 4
+    maxRegionSize: 14
+  waterBiome:
+    name: Water
+    color: {r: 0.25, g: 0.5, b: 0.85, a: 1}
+    description: flowing river water
+    weight: 1
+    minRegionSize: 4
+    maxRegionSize: 12
+  riverCount: 1
+  riverMeander: 0.35
+  riversEdgeToEdge: 1
+  riverMaxLength: 0
 --- !u!1 &651435252
 GameObject:
   m_ObjectHideFlags: 0
