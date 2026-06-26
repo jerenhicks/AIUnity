@@ -10,7 +10,7 @@ namespace AISandbox.Brains
     ///   <item><b>UseLlm = false</b> → built-in stub brain decides (the safe default).</item>
     ///   <item><b>UseLlm = true</b> with a working LLM brain → LLM decides.</item>
     ///   <item><b>UseLlm = true</b> but no LLM brain available (config didn't load) →
-    ///         <b>no decision is made</b>. We commit a no-op Observe so the contract
+    ///         <b>no decision is made</b>. We commit an End action so the contract
     ///         is honored, but we deliberately do NOT silently fall back to the stub —
     ///         the user explicitly asked to use the LLM, and acting as if everything's
     ///         fine would be misleading.</item>
@@ -31,7 +31,7 @@ namespace AISandbox.Brains
 
         public bool LlmAvailable => _llm != null;
 
-        public IEnumerator Decide(AgentPerception perception, Action<AgentTurn> commit)
+        public IEnumerator Decide(AgentPerception perception, Action<AgentAction> commit)
         {
             if (BrainSelector.UseLlm)
             {
@@ -41,11 +41,9 @@ namespace AISandbox.Brains
             return _stub.Decide(perception, commit);
         }
 
-        private static IEnumerator DoNothing(Action<AgentTurn> commit)
+        private static IEnumerator DoNothing(Action<AgentAction> commit)
         {
-            var a = AgentAction.Observe();
-            a.Note = "[no LLM available]";
-            commit(AgentTurn.Of(a));
+            commit(AgentAction.End());
             yield break;
         }
     }

@@ -42,10 +42,13 @@ Assets/Scripts/
     SelectableBrain.cs   Per-agent wrapper that dispatches LLM vs stub
 
   Sim/          Turn loop, perception, action data
-    AgentAction.cs       A single step (Move / Talk / Observe) + factory
-    AgentTurn.cs         An ordered set of steps (≤1 of each type) per turn
-    AgentPerception.cs   Read-only snapshot a brain decides from (incl. terrain)
-    TurnManager.cs       Turn-based driver; resolves composite turns; IsBusy; LLM gate
+    AgentAction.cs       A single action (Move / Talk / Inspect / End) + factory
+    ActionConfig.cs      Loads agent_actions.json: per-turn budget + LLM action dictionary
+    AgentPerception.cs   Read-only snapshot a brain decides from (terrain, available actions, this-turn history)
+    TurnManager.cs       Turn-based driver; per-action budget loop; Inspect; IsBusy; LLM gate
+
+  Logging/      LLM call logging
+    LlmLog.cs            Global record of every call (sent + response); file + in-memory + event
 
   Memory/       Per-agent context file I/O
     AgentMemory.cs       Writes per-agent JSON + .md every turn
@@ -57,7 +60,10 @@ Assets/Scripts/
   UI/           Runtime HUD + agent inspector
     HudController.cs     Builds canvas + both panels at Play; no editor setup
     AgentInspector.cs    Click-select an agent (outline) + lower-left info panel
+    LlmLogWindow.cs      Top-right "LLM Log" button + large auto-updating call viewer
 ```
+
+Config files at project root: `llm.config.json` (secret, git-ignored), `agent_actions.json` (action rulebook + per-turn budget, committed).
 
 Plus `Assets/Shaders/AgentOutline.shader` — a URP inverted-hull outline used by the selection highlight (`Agent.SetSelected`).
 
@@ -82,7 +88,8 @@ Plus `Assets/Shaders/AgentOutline.shader` — a URP inverted-hull outline used b
 - **Phase 6.6 — Agent inspector** *(done)*: `Shaders/AgentOutline.shader`, `Agent.SetSelected`, `UI/AgentInspector`. Left-click selects an agent (outline) and shows a lower-left info panel; clicking empty space clears it.
 - **Phase 7 — Biomes + world generation** *(done)*: `Biome`, `BiomeMap`, `WorldGenerator`, `Generation/` pass pipeline (region growth + rivers). `WorldGrid` colors tiles by biome; `Tile` stores its biome. Flat colors for now; height/doodads deferred.
 - **Phase 8 — Terrain perception + composite turns** *(done)*: `AgentPerception` carries the biome underfoot + nearby biomes; the LLM prompt includes terrain. Turns became composite — the brain returns an `AgentTurn` (≤1 Move + ≤1 Talk + ≤1 Observe, ordered); `TurnManager` resolves the steps in order and records one memory entry per turn (with biome).
-- **Phase 9+ — Connect a real LLM and expand actions** *(next)*: point `llm.config.json` at a real endpoint, exercise the HUD flow, then add new action types (build, gather, …) and richer tile visuals (height, doodads).
+- **Phase 9 — Action rework + per-action LLM loop + call log** *(done)*: actions = Move/Talk/Inspect (+free Look, +End), counts from `agent_actions.json` via `ActionConfig`. `TurnManager` asks the brain for one action at a time until the budget is spent or the agent ends; `Logging/LlmLog` + `UI/LlmLogWindow` record and display every call.
+- **Phase 10+ — Connect a real LLM and expand** *(next)*: point `llm.config.json` at a real endpoint, watch the LLM Log window, flesh out Inspect detail, then add new action types (build, gather, …) and richer tile visuals (height, doodads).
 
 ## Coordinate ↔ World Position
 

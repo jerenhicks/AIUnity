@@ -56,5 +56,11 @@ namespace AISandbox.Sim
         /// <summary>The agent's own recent turns (its memory), oldest-first.
         /// Unused by the StubBrain; the LLM brain will fold this into its prompt.</summary>
         public List<TurnRecord> RecentHistory = new List<TurnRecord>();
+
+        /// <summary>Action keys the agent may still take this turn (budget remaining).</summary>
+        public List<string> AvailableActions = new List<string>();
+
+        /// <summary>Summaries of actions already taken earlier this same turn.</summary>
+        public List<string> ActionsThisTurn = new List<string>();
     }
 }

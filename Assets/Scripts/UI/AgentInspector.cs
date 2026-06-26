@@ -107,9 +107,7 @@ namespace AISandbox.UI
             var history = agent.Memory?.Data?.history;
             if (history == null || history.Count == 0) return "—";
             var r = history[history.Count - 1];
-            string line = $"R{r.round}: {r.action}";
-            if (!string.IsNullOrEmpty(r.note)) line += $"\n“{r.note}”";
-            return line;
+            return $"R{r.round}: {r.action}";
         }
 
         // ---- UI construction ----------------------------------------------------

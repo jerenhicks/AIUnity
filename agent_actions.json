@@ -1,0 +1,35 @@
+{
+  "rules": "You control one agent in a shared isometric tile world that also contains other agents. Each turn you may take a limited number of actions. You are asked for ONE action at a time; after each action the world updates and you are asked again with your remaining actions for the turn. You may stop at any point by choosing the 'end' action — you do not have to use every action. Reply with a single JSON object describing one action and nothing else: no explanation, no extra text.",
+  "actions": [
+    {
+      "key": "look",
+      "usesPerTurn": 0,
+      "automatic": true,
+      "description": "A high-level survey of every tile within your view range (its terrain and any agents on it). This is ALWAYS included in each request automatically — you never request it and you must never reply with 'look'."
+    },
+    {
+      "key": "move",
+      "usesPerTurn": 1,
+      "automatic": false,
+      "description": "Walk to a tile within your move range (Manhattan distance, cardinal steps only). You cannot move onto a tile occupied by another agent. JSON: {\"action\":\"move\",\"x\":<int>,\"y\":<int>}"
+    },
+    {
+      "key": "talk",
+      "usesPerTurn": 1,
+      "automatic": false,
+      "description": "Say a short message aloud. Only agents within your talk range will hear it. JSON: {\"action\":\"talk\",\"message\":\"<text>\"}"
+    },
+    {
+      "key": "inspect",
+      "usesPerTurn": 1,
+      "automatic": false,
+      "description": "Examine one specific tile within your view in detail (its terrain and what is on it). JSON: {\"action\":\"inspect\",\"x\":<int>,\"y\":<int>}"
+    },
+    {
+      "key": "end",
+      "usesPerTurn": 0,
+      "automatic": false,
+      "description": "End your turn immediately without taking any further action. JSON: {\"action\":\"end\"}"
+    }
+  ]
+}

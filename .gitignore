@@ -96,3 +96,5 @@ node_modules/
 llm.config.json
 # Agents' runtime context files
 AgentMemory/
+# Global LLM call log (runtime output)
+LlmLog/

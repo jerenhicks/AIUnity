@@ -5,8 +5,9 @@ using AISandbox.Sim;
 namespace AISandbox.Brains
 {
     /// <summary>
-    /// Decides what an agent does this turn — an <see cref="AgentTurn"/> of up to one
-    /// move, one talk, and one observe, in a chosen order.
+    /// Decides ONE action for an agent given its current perception. The TurnManager
+    /// calls this repeatedly within a turn (re-building perception each time) until
+    /// the agent's action budget is spent or it commits an End action.
     ///
     /// Coroutine-based on purpose: the StubBrain decides instantly and just calls
     /// <paramref name="commit"/>, but the LLM brain can `yield return` a web request
@@ -16,8 +17,8 @@ namespace AISandbox.Brains
     /// </summary>
     public interface IAgentBrain
     {
-        /// <param name="perception">Read-only snapshot of what the agent knows.</param>
-        /// <param name="commit">Call exactly once with the chosen turn.</param>
-        IEnumerator Decide(AgentPerception perception, Action<AgentTurn> commit);
+        /// <param name="perception">Read-only snapshot of what the agent knows now.</param>
+        /// <param name="commit">Call exactly once with the chosen action.</param>
+        IEnumerator Decide(AgentPerception perception, Action<AgentAction> commit);
     }
 }

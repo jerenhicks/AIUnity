@@ -1,7 +1,7 @@
 using System;
 using System.Collections;
-using System.Collections.Generic;
 using System.Text;
+using AISandbox.Logging;
 using AISandbox.Sim;
 using AISandbox.World;
 using UnityEngine;
@@ -11,10 +11,11 @@ namespace AISandbox.Brains
 {
     /// <summary>
     /// An IAgentBrain backed by an LLM over an OpenAI-compatible chat endpoint.
-    /// It builds a prompt from the agent's perception + memory, sends one request
-    /// per turn, and parses a strict-JSON action back. Coroutine-based: it yields
-    /// the web request, so the TurnManager simply doesn't advance until the model
-    /// replies. Any failure falls back to a safe "observe" so the sim never stalls.
+    /// Decides ONE action per call: builds a prompt from the action rulebook
+    /// (ActionConfig), the agent's perception (incl. the free Look survey), what it
+    /// has already done this turn, and its remaining actions; POSTs to the endpoint;
+    /// parses a single-action JSON reply. Every call is logged via LlmLog. Any
+    /// failure falls back to ending the turn so the sim never stalls.
     /// </summary>
     public class LlmBrain : IAgentBrain
     {
@@ -25,16 +26,20 @@ namespace AISandbox.Brains
             _config = config;
         }
 
-        public IEnumerator Decide(AgentPerception p, Action<AgentTurn> commit)
+        public IEnumerator Decide(AgentPerception p, Action<AgentAction> commit)
         {
             if (_config == null)
             {
                 LlmStatus.MarkError("No config loaded");
-                commit(Fallback("no LLM config"));
+                LlmLog.Record(p.SelfId, "(no request — config not loaded)", "(error)");
+                commit(AgentAction.End());
                 yield break;
             }
 
-            string body = BuildRequestBody(p);
+            string systemPrompt = SystemPrompt(p);
+            string userPrompt = UserPrompt(p);
+            string body = BuildRequestBody(systemPrompt, userPrompt);
+            string sent = systemPrompt + "\n\n---\n\n" + userPrompt;
 
             using (var req = new UnityWebRequest(_config.ChatCompletionsUrl, "POST"))
             {
@@ -50,36 +55,40 @@ namespace AISandbox.Brains
 
                 if (req.result != UnityWebRequest.Result.Success)
                 {
-                    Debug.LogWarning($"LlmBrain ({p.SelfId}): request failed — {req.error}. Falling back to observe.");
+                    Debug.LogWarning($"LlmBrain ({p.SelfId}): request failed — {req.error}.");
                     LlmStatus.MarkError("Connection failed");
-                    commit(Fallback("request failed"));
+                    LlmLog.Record(p.SelfId, sent, $"(request failed: {req.error})");
+                    commit(AgentAction.End());
                     yield break;
                 }
 
                 string content = ExtractAssistantContent(req.downloadHandler.text);
-                AgentTurn plan = ParsePlan(content, p);
-                if (plan != null)
+                LlmLog.Record(p.SelfId, sent, content ?? req.downloadHandler.text);
+
+                AgentAction action = ParseAction(content, p);
+                if (action != null)
                     LlmStatus.MarkConnected("Ready");
                 else
+                {
                     LlmStatus.MarkError("Bad model response");
-                commit(plan ?? Fallback("could not parse response"));
+                    action = AgentAction.End();
+                }
+                commit(action);
             }
         }
 
         // ---- Prompt building ----------------------------------------------------
 
-        private string BuildRequestBody(AgentPerception p)
+        private string BuildRequestBody(string systemPrompt, string userPrompt)
         {
-            var messages = new[]
-            {
-                new ReqMessage { role = "system", content = SystemPrompt(p) },
-                new ReqMessage { role = "user", content = UserPrompt(p) },
-            };
-
             var reqBody = new ReqBody
             {
                 model = _config.model,
-                messages = messages,
+                messages = new[]
+                {
+                    new ReqMessage { role = "system", content = systemPrompt },
+                    new ReqMessage { role = "user", content = userPrompt },
+                },
                 temperature = _config.temperature,
                 max_tokens = _config.maxTokens,
             };
@@ -88,35 +97,31 @@ namespace AISandbox.Brains
 
         private static string SystemPrompt(AgentPerception p)
         {
-            return
-                $"You are {p.SelfId}, an autonomous agent living in a shared {p.WorldWidth}x{p.WorldHeight} tile grid world with other agents. " +
-                "You act one turn at a time. In a single turn you may take up to THREE steps — at most one move, one talk, and one observe — in any order you choose:\n" +
-                $"- move: walk to a tile within Manhattan distance {p.MoveRange} of your position (cardinal steps only); you cannot enter a tile occupied by another agent.\n" +
-                $"- talk: shout a short message; only agents within {p.TalkRange} tiles hear it. Order matters — talking before vs after moving reaches different agents.\n" +
-                "- observe: note something about the terrain or your surroundings; this is recorded to your memory.\n" +
-                $"You can see other agents and terrain within {p.ObserveRange} tiles. You are curious and social: explore, seek out others, communicate, and react to what they say and do.\n" +
-                "Respond with ONLY a JSON object of this exact shape and no other text. Include only the steps you want, in the order you intend them to happen:\n" +
-                "{\"steps\":[" +
-                "{\"action\":\"move\",\"x\":<int>,\"y\":<int>,\"note\":\"<short reason>\"}," +
-                "{\"action\":\"talk\",\"message\":\"<what you say>\",\"note\":\"<short reason>\"}," +
-                "{\"action\":\"observe\",\"note\":\"<what you notice>\"}" +
-                "]}";
+            var sb = new StringBuilder();
+            sb.AppendLine($"You are {p.SelfId}, an autonomous agent in a shared {p.WorldWidth}x{p.WorldHeight} tile world that also contains other agents. You are curious and social: explore, seek out others, communicate, and react.");
+            sb.AppendLine();
+            sb.AppendLine(ActionConfig.DictionaryText());
+            sb.AppendLine($"Your ranges — move {p.MoveRange} (Manhattan), talk {p.TalkRange}, view {p.ObserveRange} (Chebyshev).");
+            sb.Append("Reply with exactly ONE JSON object for your next action and nothing else.");
+            return sb.ToString();
         }
 
         private static string UserPrompt(AgentPerception p)
         {
             var sb = new StringBuilder();
-            sb.AppendLine($"Your position: ({p.SelfCoord.x}, {p.SelfCoord.y}).");
-            sb.AppendLine($"World bounds: x 0..{p.WorldWidth - 1}, y 0..{p.WorldHeight - 1}. Move range: {p.MoveRange} (Manhattan).");
+            sb.AppendLine($"Your position: ({p.SelfCoord.x}, {p.SelfCoord.y}). World bounds: x 0..{p.WorldWidth - 1}, y 0..{p.WorldHeight - 1}.");
 
             if (!string.IsNullOrEmpty(p.SelfBiome))
             {
                 string desc = string.IsNullOrEmpty(p.SelfBiomeDescription) ? "" : $" — {p.SelfBiomeDescription}";
-                sb.AppendLine($"You are standing on: {p.SelfBiome}{desc}.");
+                sb.AppendLine($"Standing on: {p.SelfBiome}{desc}.");
             }
-            if (p.NearbyBiomes != null && p.NearbyBiomes.Count > 0)
-                sb.AppendLine($"Nearby terrain: {string.Join(", ", p.NearbyBiomes)}.");
 
+            // The automatic LOOK survey — label it clearly so the model knows it already has perception.
+            sb.AppendLine("LOOK SURVEY (automatic — this is what you can currently see):");
+            sb.AppendLine(p.NearbyBiomes != null && p.NearbyBiomes.Count > 0
+                ? $"  Terrain in view: {string.Join(", ", p.NearbyBiomes)}."
+                : "  Terrain in view: open, uniform terrain around you.");
             if (p.VisibleAgents.Count > 0)
             {
                 var who = new StringBuilder();
@@ -125,9 +130,9 @@ namespace AISandbox.Brains
                     if (who.Length > 0) who.Append(", ");
                     who.Append($"{v.Id} at ({v.Coord.x},{v.Coord.y})");
                 }
-                sb.AppendLine($"Agents you can see: {who}.");
+                sb.AppendLine($"  Agents in view: {who}.");
             }
-            else sb.AppendLine("Agents you can see: none.");
+            else sb.AppendLine("  Agents in view: none.");
 
             if (p.HeardMessages.Count > 0)
             {
@@ -135,17 +140,23 @@ namespace AISandbox.Brains
                 foreach (var h in p.HeardMessages)
                     sb.AppendLine($"  - {h.FromId}: \"{h.Text}\"");
             }
-            else sb.AppendLine("You heard nothing this turn.");
+
+            sb.AppendLine(p.ActionsThisTurn.Count > 0
+                ? $"Earlier this turn you already: {string.Join("; ", p.ActionsThisTurn)}."
+                : "You have not acted yet this turn.");
+
+            sb.AppendLine(p.AvailableActions.Count > 0
+                ? $"Actions still available this turn: {string.Join(", ", p.AvailableActions)} (or 'end')."
+                : "No actions remain — you must 'end'.");
 
             if (p.RecentHistory.Count > 0)
             {
-                sb.AppendLine("Your recent memory:");
+                sb.AppendLine("Recent memory:");
                 foreach (var r in p.RecentHistory)
                     sb.AppendLine($"  - R{r.round}: {r.action}");
             }
-            else sb.AppendLine("Your recent memory: (none yet).");
 
-            sb.Append("It is your turn. Respond with JSON only.");
+            sb.Append("Choose ONE action now as a single JSON object.");
             return sb.ToString();
         }
 
@@ -163,57 +174,48 @@ namespace AISandbox.Brains
             return null;
         }
 
-        private static AgentTurn ParsePlan(string content, AgentPerception p)
+        private static AgentAction ParseAction(string content, AgentPerception p)
         {
             if (string.IsNullOrEmpty(content)) return null;
 
-            // The model may wrap JSON in prose or code fences; grab the object.
             int start = content.IndexOf('{');
             int end = content.LastIndexOf('}');
             if (start < 0 || end <= start) return null;
             string json = content.Substring(start, end - start + 1);
 
-            PlanJson pj;
-            try { pj = JsonUtility.FromJson<PlanJson>(json); }
+            ActionJson aj;
+            try { aj = JsonUtility.FromJson<ActionJson>(json); }
             catch { return null; }
-            if (pj == null || pj.steps == null || pj.steps.Length == 0) return null;
+            if (aj == null || string.IsNullOrEmpty(aj.action)) return null;
 
-            var turn = new AgentTurn();
-            var seenTypes = new HashSet<string>();
-
-            foreach (var s in pj.steps)
+            switch (aj.action.Trim().ToLowerInvariant())
             {
-                if (s == null || string.IsNullOrEmpty(s.action)) continue;
-                string kind = s.action.Trim().ToLowerInvariant();
-                if (seenTypes.Contains(kind)) continue; // at most one of each type
+                case "move":
+                    var target = ResolveReachable(p, new GridCoord(aj.x, aj.y));
+                    return target.HasValue ? AgentAction.Move(target.Value) : AgentAction.End();
 
-                AgentAction step = kind switch
-                {
-                    "move" => BuildMove(s, p),
-                    "talk" => string.IsNullOrWhiteSpace(s.message) ? null : AgentAction.Talk(s.message.Trim()),
-                    "observe" => AgentAction.Observe(),
-                    _ => null,
-                };
-                if (step == null) continue;
+                case "talk":
+                    return string.IsNullOrWhiteSpace(aj.message)
+                        ? AgentAction.End()
+                        : AgentAction.Talk(aj.message.Trim());
 
-                step.Note = s.note;
-                seenTypes.Add(kind);
-                turn.Add(step);
+                case "inspect":
+                    int ix = Mathf.Clamp(aj.x, 0, Mathf.Max(0, p.WorldWidth - 1));
+                    int iy = Mathf.Clamp(aj.y, 0, Mathf.Max(0, p.WorldHeight - 1));
+                    return AgentAction.Inspect(new GridCoord(ix, iy));
+
+                case "end":
+                    return AgentAction.End();
+
+                default:
+                    // Includes "look" (automatic, not a valid reply) or anything unrecognized.
+                    return null;
             }
-
-            return turn.IsEmpty ? null : turn;
-        }
-
-        private static AgentAction BuildMove(StepJson s, AgentPerception p)
-        {
-            var target = ResolveReachable(p, new GridCoord(s.x, s.y));
-            return target.HasValue ? AgentAction.Move(target.Value) : null;
         }
 
         /// <summary>
-        /// Returns the requested tile if it's reachable; otherwise the reachable
-        /// tile closest to it (so a slightly-too-far request still makes progress).
-        /// Null only if the agent has nowhere to go.
+        /// Returns the requested tile if reachable; otherwise the reachable tile
+        /// closest to it. Null only if the agent has nowhere to go.
         /// </summary>
         private static GridCoord? ResolveReachable(AgentPerception p, GridCoord requested)
         {
@@ -228,13 +230,6 @@ namespace AISandbox.Brains
                 if (d < bestDist) { bestDist = d; best = c; }
             }
             return best;
-        }
-
-        private static AgentTurn Fallback(string why)
-        {
-            var a = AgentAction.Observe();
-            a.Note = $"[fallback: {why}]";
-            return AgentTurn.Of(a);
         }
 
         // ---- JSON DTOs ----------------------------------------------------------
@@ -254,16 +249,13 @@ namespace AISandbox.Brains
         [Serializable] private class Choice { public RespMessage message; }
         [Serializable] private class RespMessage { public string content; }
 
-        [Serializable] private class PlanJson { public StepJson[] steps; }
-
         [Serializable]
-        private class StepJson
+        private class ActionJson
         {
             public string action;
             public int x;
             public int y;
             public string message;
-            public string note;
         }
     }
 }

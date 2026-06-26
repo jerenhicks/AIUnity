@@ -2,7 +2,31 @@
 
 > Running log of what's done and what's next. Newest at top.
 
-## Status: World generation + terrain + composite turns
+## Status: Action rework, per-action LLM loop, LLM call log
+
+### Actions
+- Action set is now **Move, Talk, Inspect** (each costs an action), plus **Look** (free, automatic survey of visible tiles, always in the prompt) and **End** (stop the turn). The old "observe/note" became **Look**; **Inspect** is the new detailed, tile-specific look (basic detail now — biome + occupant — to expand later).
+- Counts live in a config file: **`agent_actions.json`** (project root), loaded by `Sim/ActionConfig`. Each action has a `usesPerTurn` (default 1 for move/talk/inspect; 0 = free). The same file's descriptions + rules become the action dictionary sent to the LLM.
+
+### Per-action turn loop
+- A turn is no longer one batched plan. `TurnManager` now loops **one action per LLM call**: build perception (incl. remaining actions + what's been done this turn) → ask the brain for ONE action → execute → repeat until the budget is spent or the agent chooses **End**. `IAgentBrain.Decide` is back to committing a single `AgentAction`. State is rebuilt between actions, so the model reacts to changes. Each executed action is written to memory.
+- `StubBrain` mimics the same loop with random valid actions / early end.
+
+### LLM call log
+- `Logging/LlmLog` records every call (sent prompt + response) to `<projectRoot>/LlmLog/llm_calls.jsonl` and keeps a capped in-memory list.
+- `UI/LlmLogWindow` — a **top-right "LLM Log" button** (below the turn panel) opens a large, scrollable, auto-updating window of recent calls (newest first).
+
+### Editor steps
+- Add an empty GameObject with **LlmLogWindow** (for the log button/window).
+- Optional: edit `agent_actions.json` to change per-turn action counts or the action descriptions sent to the model.
+- Recompile; everything else is wired.
+
+### Notes
+- `agent_actions.json` is committed (shared config, no secrets). `LlmLog/` is git-ignored (runtime output).
+
+---
+
+## Status (prior): World generation + terrain + composite turns
 
 ### What changed
 - **Biomes & world generation** — `World/Biome`, `BiomeMap`, `WorldGenerator`, and a `Generation/` pass pipeline (`RegionGrowthPass` = contiguous blobs within each biome's min/max size; `RiverPass` = meandering edge-to-edge water). `WorldGrid` auto-finds a `WorldGenerator`, colors tiles by biome (per-biome material cache), and falls back to the old checkerboard if none. `Tile` now stores its `Biome`. Seed 0 = fresh each run. Tunable entirely in the Inspector.

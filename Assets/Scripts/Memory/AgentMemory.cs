@@ -83,8 +83,6 @@ namespace AISandbox.Memory
                 sb.AppendLine($"- Action: {r.action}");
                 sb.AppendLine($"- Saw: {Join(r.observed)}");
                 sb.AppendLine($"- Heard: {Join(r.heard)}");
-                if (!string.IsNullOrEmpty(r.note))
-                    sb.AppendLine($"- Note: {r.note}");
                 sb.AppendLine();
             }
 

@@ -29,6 +29,9 @@ namespace AISandbox.Sim
         [Tooltip("Pause inserted after each agent's turn, so it's watchable.")]
         [Min(0f)] public float pauseBetweenTurns = 0.3f;
 
+        [Tooltip("Pause between individual actions within one agent's turn.")]
+        [Min(0f)] public float pauseBetweenActions = 0.2f;
+
         [Tooltip("Agent walking speed, in tiles per second.")]
         [Min(0.1f)] public float moveSpeed = 4f;
 
@@ -123,55 +126,90 @@ namespace AISandbox.Sim
 
         private IEnumerator RunTurn(Agent agent, Agent[] all)
         {
-            var perception = BuildPerception(agent, all);
+            // Per-turn budget: how many times each action type may be used (from config).
+            var remaining = new Dictionary<string, int>();
+            foreach (var key in ActionConfig.BudgetedKeys())
+                remaining[key] = ActionConfig.UsesPerTurn(key);
 
-            AgentTurn plan = null;
-            // Fully waits here — a real LLM brain yields its web request and we
-            // simply don't advance until it commits a turn.
-            yield return agent.Brain.Decide(perception, t => plan = t);
+            var actionsThisTurn = new List<string>();
+            int safety = 0;
+            bool actedAtLeastOnce = false;
 
-            var summaries = new List<string>();
-            var notes = new List<string>();
-            var doneTypes = new HashSet<ActionType>();
-
-            if (plan != null)
+            while (safety++ < 24)
             {
-                foreach (var step in plan.Steps)
+                // Which budgeted actions are still available?
+                var available = new List<string>();
+                foreach (var kv in remaining)
+                    if (kv.Value > 0) available.Add(kv.Key);
+                if (available.Count == 0) break; // nothing left to do
+
+                var perception = BuildPerception(agent, all);
+                perception.AvailableActions = available;
+                perception.ActionsThisTurn = new List<string>(actionsThisTurn);
+
+                // Ask the brain for ONE action (a slow LLM call simply blocks here).
+                AgentAction action = null;
+                yield return agent.Brain.Decide(perception, a => action = a);
+
+                if (action == null || action.Type == ActionType.End) break;
+
+                string key = action.Key;
+                if (!remaining.TryGetValue(key, out int left) || left <= 0)
+                    break; // brain chose an unavailable action — end rather than loop
+
+                string summary = null;
+                switch (action.Type)
                 {
-                    if (step == null || doneTypes.Contains(step.Type)) continue; // one per type
-                    doneTypes.Add(step.Type);
+                    case ActionType.Move:
+                        bool moved = false;
+                        var dest = action.TargetTile;
+                        yield return agent.MoveTo(dest, moveSpeed, ok => moved = ok);
+                        summary = moved ? $"Move→{dest}" : $"Move→{dest} (blocked)";
+                        Log(agent, moved ? $"moved to {dest}" : $"tried to move to {dest} (blocked)");
+                        break;
 
-                    switch (step.Type)
-                    {
-                        case ActionType.Move:
-                            bool moved = false;
-                            var dest = step.MoveTarget;
-                            yield return agent.MoveTo(dest, moveSpeed, ok => moved = ok);
-                            summaries.Add(moved ? $"Move→{dest}" : $"Move→{dest} (blocked)");
-                            Log(agent, moved ? $"moved to {dest}" : $"tried to move to {dest} (blocked)");
-                            break;
+                    case ActionType.Talk:
+                        DeliverTalk(agent, action.Message, all);
+                        summary = $"Talk:\"{action.Message}\"";
+                        break;
 
-                        case ActionType.Talk:
-                            DeliverTalk(agent, step.Message, all);
-                            summaries.Add($"Talk:\"{step.Message}\"");
-                            break;
-
-                        case ActionType.Observe:
-                            summaries.Add("Observe");
-                            Log(agent, $"observed (sees {perception.VisibleAgents.Count} agent(s) within {agent.Stats.Observe})");
-                            break;
-                    }
-
-                    if (!string.IsNullOrEmpty(step.Note)) notes.Add($"{step.Type}: {step.Note}");
+                    case ActionType.Inspect:
+                        summary = ResolveInspect(agent, action.TargetTile);
+                        break;
                 }
+
+                remaining[key] = left - 1;
+                actionsThisTurn.Add(summary);
+                RecordAction(agent, summary, perception);
+                actedAtLeastOnce = true;
+
+                if (pauseBetweenActions > 0f)
+                    yield return new WaitForSeconds(pauseBetweenActions);
             }
 
-            if (summaries.Count == 0) summaries.Add("idle");
-            RecordTurn(agent, summaries, notes, perception);
+            if (!actedAtLeastOnce)
+                RecordAction(agent, "idle", BuildPerception(agent, all));
         }
 
-        /// <summary>Appends this turn (all its steps) to the agent's memory / context file.</summary>
-        private void RecordTurn(Agent agent, List<string> summaries, List<string> notes, AgentPerception perception)
+        /// <summary>Detailed examination of one tile. Placeholder detail for now; expandable.</summary>
+        private string ResolveInspect(Agent agent, GridCoord target)
+        {
+            var tile = grid.GetTile(target);
+            string detail;
+            if (tile == null)
+                detail = $"Inspect ({target.x},{target.y}): outside the world";
+            else
+            {
+                string biome = tile.Biome != null ? tile.Biome.name : "unknown terrain";
+                string occ = tile.IsOccupied ? (tile.Occupant?.DisplayName ?? "occupied") : "empty";
+                detail = $"Inspect ({target.x},{target.y}): {biome}, {occ}";
+            }
+            Log(agent, detail);
+            return detail;
+        }
+
+        /// <summary>Appends one executed action to the agent's memory / context file.</summary>
+        private void RecordAction(Agent agent, string summary, AgentPerception perception)
         {
             if (agent.Memory == null) return;
 
@@ -192,13 +230,12 @@ namespace AISandbox.Sim
             agent.Memory.Append(new TurnRecord
             {
                 round = _round,
-                action = string.Join("; ", summaries),
+                action = summary,
                 x = agent.Coord.x,
                 y = agent.Coord.y,
                 biome = perception.SelfBiome,
                 observed = observed,
                 heard = heard,
-                note = notes.Count > 0 ? string.Join(" | ", notes) : null,
             });
         }
 

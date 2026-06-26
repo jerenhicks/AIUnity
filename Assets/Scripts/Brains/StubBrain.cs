@@ -1,14 +1,15 @@
 using System;
 using System.Collections;
-using System.Collections.Generic;
 using AISandbox.Sim;
+using AISandbox.World;
+using UnityEngine;
 
 namespace AISandbox.Brains
 {
     /// <summary>
-    /// Placeholder decision-maker: picks a valid action at random. Stands in for a
-    /// real model so the whole simulation loop can run and be debugged now. Replace
-    /// with an LLM-backed IAgentBrain later without touching anything else.
+    /// Placeholder decision-maker: picks ONE valid action at random from whatever the
+    /// agent may still do this turn (or ends the turn). Mirrors the LLM brain's
+    /// one-action-per-call contract so the whole loop runs without a model.
     /// </summary>
     public class StubBrain : IAgentBrain
     {
@@ -25,47 +26,53 @@ namespace AISandbox.Brains
             _rng = new System.Random(seed);
         }
 
-        public IEnumerator Decide(AgentPerception p, Action<AgentTurn> commit)
+        public IEnumerator Decide(AgentPerception p, Action<AgentAction> commit)
         {
-            commit(Plan(p));
+            commit(Choose(p));
             yield break; // decided instantly; an LLM brain would yield on a request here
         }
 
-        // Each turn the stub may move, talk, and observe — a random subset, in random
-        // order — so it exercises the full composite-turn path the LLM brain uses.
-        private AgentTurn Plan(AgentPerception p)
+        private AgentAction Choose(AgentPerception p)
         {
-            var steps = new List<AgentAction>();
+            var avail = p.AvailableActions;
+            if (avail == null || avail.Count == 0) return AgentAction.End();
 
-            if (p.ReachableTiles.Count > 0 && _rng.Next(100) < 70)
+            // Sometimes stop early even with actions left.
+            if (_rng.Next(100) < 15) return AgentAction.End();
+
+            string key = avail[_rng.Next(avail.Count)];
+            switch (key)
             {
-                var pick = p.ReachableTiles[_rng.Next(p.ReachableTiles.Count)];
-                if (pick == p.SelfCoord && p.ReachableTiles.Count > 1)
-                    pick = p.ReachableTiles[_rng.Next(p.ReachableTiles.Count)];
-                steps.Add(AgentAction.Move(pick));
+                case "move":
+                    if (p.ReachableTiles.Count > 0)
+                    {
+                        var pick = p.ReachableTiles[_rng.Next(p.ReachableTiles.Count)];
+                        if (pick == p.SelfCoord && p.ReachableTiles.Count > 1)
+                            pick = p.ReachableTiles[_rng.Next(p.ReachableTiles.Count)];
+                        return AgentAction.Move(pick);
+                    }
+                    return AgentAction.End();
+
+                case "talk":
+                    return AgentAction.Talk(SmallTalk[_rng.Next(SmallTalk.Length)]);
+
+                case "inspect":
+                    return AgentAction.Inspect(PickVisibleTile(p));
+
+                default:
+                    return AgentAction.End();
             }
-
-            if (_rng.Next(100) < 40)
-                steps.Add(AgentAction.Talk(SmallTalk[_rng.Next(SmallTalk.Length)]));
-
-            if (steps.Count == 0 || _rng.Next(100) < 50)
-            {
-                var observe = AgentAction.Observe();
-                observe.Note = $"on {Terrain(p)}";
-                steps.Add(observe);
-            }
-
-            // Shuffle step order.
-            for (int i = steps.Count - 1; i > 0; i--)
-            {
-                int j = _rng.Next(i + 1);
-                (steps[i], steps[j]) = (steps[j], steps[i]);
-            }
-
-            return new AgentTurn(steps.ToArray());
         }
 
-        private static string Terrain(AgentPerception p) =>
-            string.IsNullOrEmpty(p.SelfBiome) ? "open ground" : p.SelfBiome;
+        private GridCoord PickVisibleTile(AgentPerception p)
+        {
+            if (p.VisibleAgents.Count > 0 && _rng.Next(2) == 0)
+                return p.VisibleAgents[_rng.Next(p.VisibleAgents.Count)].Coord;
+
+            int r = Mathf.Max(1, p.ObserveRange);
+            int x = Mathf.Clamp(p.SelfCoord.x + _rng.Next(-r, r + 1), 0, Mathf.Max(0, p.WorldWidth - 1));
+            int y = Mathf.Clamp(p.SelfCoord.y + _rng.Next(-r, r + 1), 0, Mathf.Max(0, p.WorldHeight - 1));
+            return new GridCoord(x, y);
+        }
     }
 }
